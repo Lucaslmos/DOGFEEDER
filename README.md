@@ -447,19 +447,6 @@ Projeto desenvolvido como solução para automatização da alimentação de ani
 ---
 
 
-
-Telas:
-![image](https://github.com/user-attachments/assets/edb493bb-f179-464c-a0a5-08fc34f72b28)
-
-Projeto 3D: 
-
-![image](https://github.com/user-attachments/assets/36a538cf-b547-476c-8221-f3f29bc3860a)
-![image](https://github.com/user-attachments/assets/0f17ccc6-d330-440a-81d8-4eb8112f94ca)
-
-Video sobre:
-https://www.youtube.com/watch?v=XxYPfcei0gA
-
-
 **Esp32 - Dogfeeder - project 2024**
 
 *Take care of those who love you* 🐕❤️

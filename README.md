@@ -1,453 +1,302 @@
-# 🐕 DOGFEEDER - Alimentador Automático para Pets
+# DOGFEEDER
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
-![ESP32](https://img.shields.io/badge/ESP32-WiFi-green.svg)
-![PHP](https://img.shields.io/badge/PHP-API-orange.svg)
-![License](https://img.shields.io/badge/license-ISC-lightgrey.svg)
+Alimentador automático para pets baseado em ESP32, com backend em PHP/MySQL e
+interface web estática. O microcontrolador faz *polling* periódico de uma API
+HTTP para decidir quando acionar o motor: por horário programado (até três
+horários/dia) ou por comando manual disparado pela interface web.
 
-## 📋 Sobre o Projeto
+O sistema é dividido em quatro partes que se comunicam exclusivamente por HTTP
+e SQL — não há acoplamento direto entre frontend e firmware; ambos conversam
+apenas com a API PHP, que persiste o estado no MySQL.
 
-O **DOGFEEDER** é um sistema completo de alimentação automática para animais de estimação. O projeto foi desenvolvido para permitir que tutores automatizem a alimentação de seus pets através de uma interface web intuitiva, com controle remoto e programação de horários.
+---
 
-### 🎯 Objetivo
-
-Facilitar o cuidado com animais de estimação, permitindo:
-- Alimentação automática em horários programados
-- Alimentação manual remota a qualquer momento
-- Controle da quantidade de ração dispensada
-- Interface web simples e intuitiva
-
-## ✨ Funcionalidades
-
-- ✅ **Alimentação Automática**: Configure até 3 horários diferentes para alimentação automática
-- ✅ **Alimentação Manual**: Alimente seu pet remotamente através da interface web
-- ✅ **Controle de Quantidade**: Configure o tempo de alimentação (quantidade de ração)
-- ✅ **Interface Web Responsiva**: Acesse de qualquer dispositivo conectado à mesma rede
-- ✅ **Sincronização de Horário**: ESP32 sincroniza automaticamente com servidor NTP
-- ✅ **Controle em Tempo Real**: Ativação/desativação do motor via requisições HTTP
-
-## 🏗️ Arquitetura do Sistema
-
-O projeto é composto por três componentes principais:
+## Arquitetura
 
 ```
-┌─────────────┐      HTTP Requests      ┌─────────────┐      MySQL      ┌─────────────┐
-│   ESP32     │ ◄─────────────────────► │  API PHP    │ ◄────────────► │   Database  │
-│  (Hardware) │                         │  (Backend)  │                │             │
-└─────────────┘                         └─────────────┘                └─────────────┘
-       ▲                                       ▲
-       │                                       │
-       │ HTTP Requests                         │ HTTP Requests
-       │                                       │
-┌─────────────┐                         ┌─────────────┐
-│  Web App    │ ──────────────────────► │  API PHP    │
-│  (Frontend) │                         │  (Backend)  │
-└─────────────┘                         └─────────────┘
+                         HTTP (GET estado/horários/tempo)
+   ┌──────────────┐  ◄───────────────────────────────────  ┌──────────────┐        ┌──────────┐
+   │    ESP32     │                                         │   API PHP    │  SQL   │  MySQL   │
+   │  (firmware)  │  ───────────────────────────────────►  │  (mysqli)    │ ◄────► │ 2 bancos │
+   └──────────────┘     HTTP (POST reset estado=0)          └──────────────┘        └──────────┘
+                                                                   ▲
+                         HTTP (POST estado=1 / horários / tempo)   │
+   ┌──────────────┐  ──────────────────────────────────────────────┘
+   │   Web (SPA   │
+   │  estática)   │
+   └──────────────┘
 ```
 
-### Componentes
+Fluxo de dados:
 
-1. **ESP32** - Microcontrolador que controla o motor físico
-2. **API PHP** - Backend que gerencia dados e comunicação
-3. **Web App** - Interface web para configuração e controle
-4. **MySQL** - Banco de dados para armazenar configurações
+- **Estado do motor** é uma flag compartilhada (`0`/`1`) no MySQL. A web grava
+  `1` para "alimentar agora"; o ESP32 lê esse valor, executa o pulso e grava
+  `0` de volta para encerrar o comando.
+- **Horários** e **tempo de alimentação** são lidos pelo ESP32 a cada iteração
+  do `loop()` e usados para decidir o acionamento por agendamento.
 
-## 📁 Estrutura do Projeto
+O estado é **global e único** — não há conceito de usuário/dispositivo. Uma
+instância da API atende um único alimentador.
+
+---
+
+## Stack
+
+| Camada    | Tecnologia                                                                 |
+|-----------|----------------------------------------------------------------------------|
+| Firmware  | C++ (Arduino), `WiFi.h`, `HTTPClient`, `ArduinoJson`, `time.h` (SNTP)      |
+| Backend   | PHP procedural com `mysqli`, JSON sobre HTTP, CORS aberto (`*`)            |
+| Banco     | MySQL — dois schemas: `horariosDeAlimentacao` e `estado_motor`            |
+| Frontend  | HTML/CSS/JS puro, empacotado com Parcel 2                                  |
+
+---
+
+## Estrutura do repositório
 
 ```
 DOGFEEDER/
-│
-├── ESP32 CODE/
-│   └── CODE-1.0/
-│       └── CODE-1.0.ino          # Código principal do ESP32
-│
+├── ESP32 CODE/CODE-1.0/CODE-1.0.ino     # firmware (loop de polling + acionamento)
 ├── API PHP/
-│   ├── getinfo horarios/
-│   │   ├── get.php               # GET - Retorna horários configurados
-│   │   ├── indexget.html
-│   │   └── scriptget.js
-│   │
-│   ├── insertinfo horarios/
-│   │   ├── insertdata.php        # POST - Insere novos horários
-│   │   ├── insethorarios.html
-│   │   └── script.js
-│   │
 │   ├── Motor estados/
-│   │   ├── estadomotor.php       # GET - Retorna estado do motor
-│   │   ├── postestadomotor.php   # POST - Atualiza estado do motor
-│   │   └── indexpost.html
-│   │
+│   │   ├── estadomotor.php               # GET  estado atual do motor
+│   │   └── postestadomotor.php           # POST atualiza estado (CORS)
+│   ├── getinfo horarios/get.php          # GET  últimos 3 horários
+│   ├── insertinfo horarios/insertdata.php# POST insere novos horários
 │   └── tempoalimentacao/
-│       ├── gettempoalimentacao.php        # GET - Retorna tempo de alimentação
-│       └── inserttempoalimentacao.php     # POST - Insere tempo de alimentação
-│
-├── SITE/
-│   ├── index.html                # Tela inicial
-│   ├── Menu.html                 # Menu principal
-│   ├── configure.html            # Configuração de horários
-│   ├── login.html                # Tela de login
-│   ├── account.html              # Conta do usuário
-│   ├── script.js                 # JavaScript principal
-│   ├── *.css                     # Arquivos de estilo
-│   ├── public/                   # Imagens e assets
-│   └── package.json              # Dependências Node.js
-│
-└── DATABASE/
-    ├── Banco Horaios alimentacao.txt    # Script SQL - Horários
-    └── Banco estado motor.txt           # Script SQL - Estado do motor
+│       ├── gettempoalimentacao.php       # GET  tempo de alimentação (array)
+│       └── inserttempoalimentacao.php    # POST atualiza tempo de alimentação
+├── SITE/                                  # interface web (Parcel)
+│   ├── *.html / *.css / script.js
+│   ├── public/                            # assets
+│   └── package.json
+└── DATABASE/                              # scripts SQL de referência
 ```
 
-## 🚀 Instalação e Configuração
+---
 
-### Pré-requisitos
+## Modelo de dados
 
-- **ESP32** com suporte WiFi
-- **Servidor PHP** (XAMPP, WAMP, ou similar)
-- **MySQL** instalado e configurado
-- **Arduino IDE** com bibliotecas:
-  - WiFi
-  - HTTPClient
-  - ArduinoJson
-- **Node.js** e **npm** (para o site web)
-
-### 1. Configuração do Banco de Dados
-
-Execute os scripts SQL localizados em `DATABASE/`:
+Dois bancos separados. **Atenção:** `get.php` referencia o banco como
+`horariosDeAlimentacao`, enquanto `insertdata.php` e os scripts de tempo usam
+`horariosdealimentacao` (minúsculo). Em MySQL no Windows isso é equivalente,
+mas em Linux (case-sensitive) são bancos distintos — padronize o nome ao
+implantar.
 
 ```sql
--- Criar banco de dados para horários
+-- Banco 1: horários e duração do pulso
 CREATE DATABASE IF NOT EXISTS horariosDeAlimentacao;
 USE horariosDeAlimentacao;
 
--- Tabelas para horários
-CREATE TABLE Horario1 (
-    Id INT PRIMARY KEY AUTO_INCREMENT,
-    horaAlimentacao1 INT,
-    minutoAlimentacao1 INT
-);
+CREATE TABLE Horario1 (Id INT PRIMARY KEY AUTO_INCREMENT, horaAlimentacao1 INT, minutoAlimentacao1 INT);
+CREATE TABLE Horario2 (Id INT PRIMARY KEY AUTO_INCREMENT, horaAlimentacao2 INT, minutoAlimentacao2 INT);
+CREATE TABLE Horario3 (Id INT PRIMARY KEY AUTO_INCREMENT, horaAlimentacao3 INT, minutoAlimentacao3 INT);
+CREATE TABLE tempo    (Id INT PRIMARY KEY AUTO_INCREMENT, tempoalimentacao INT);
 
-CREATE TABLE Horario2 (
-    Id INT PRIMARY KEY AUTO_INCREMENT,
-    horaAlimentacao2 INT,
-    minutoAlimentacao2 INT
-);
+-- 'tempo' é atualizado via UPDATE; precisa de uma linha inicial
+INSERT INTO tempo (tempoalimentacao) VALUES (5);
 
-CREATE TABLE Horario3 (
-    Id INT PRIMARY KEY AUTO_INCREMENT,
-    horaAlimentacao3 INT,
-    minutoAlimentacao3 INT
-);
-
--- Tabela para tempo de alimentação
-CREATE TABLE tempo (
-    Id INT PRIMARY KEY AUTO_INCREMENT,
-    tempoalimentacao INT
-);
-```
-
-```sql
--- Criar banco de dados para estado do motor
+-- Banco 2: estado do motor
 CREATE DATABASE IF NOT EXISTS estado_motor;
 USE estado_motor;
 
-CREATE TABLE IF NOT EXISTS liga_desliga (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    estado INT
-);
+CREATE TABLE IF NOT EXISTS liga_desliga (id INT AUTO_INCREMENT PRIMARY KEY, estado INT);
 
--- Inserir valor inicial
+-- 'liga_desliga' é atualizado via UPDATE; precisa de uma linha inicial
 INSERT INTO liga_desliga (estado) VALUES (0);
 ```
 
-### 2. Configuração da API PHP
+Observações sobre o comportamento das tabelas (derivado do código PHP):
 
-1. Copie a pasta `API PHP/` para o diretório do seu servidor web (ex: `htdocs/` no XAMPP)
-2. Configure as credenciais do MySQL nos arquivos PHP:
-   - `servername`: "localhost"
-   - `username`: "root" (ou seu usuário MySQL)
-   - `password`: "" (ou sua senha MySQL)
-   - `dbname`: Nome do banco de dados
+- `Horario1/2/3` crescem por `INSERT` a cada gravação; as leituras usam sempre
+  `ORDER BY Id DESC LIMIT 1` (último registro). Não há limpeza — a tabela
+  acumula histórico.
+- `tempo` e `liga_desliga` são modificadas por `UPDATE`, portanto **exigem uma
+  linha pré-existente** (os `INSERT` iniciais acima). Sem isso, gravar tempo ou
+  estado não tem efeito.
 
-3. Ajuste o endereço IP nos arquivos PHP para o IP do seu servidor:
-   ```php
-   // Exemplo: http://192.168.100.103:8080/dog/...
-   ```
+---
 
-### 3. Configuração do ESP32
+## API HTTP
 
-1. Abra o arquivo `ESP32 CODE/CODE-1.0/CODE-1.0.ino` no Arduino IDE
-2. Configure as credenciais WiFi:
-   ```cpp
-   const char* ssid = "SEU_WIFI_SSID";
-   const char* password = "SUA_SENHA_WIFI";
-   ```
-3. Configure o endereço IP do servidor:
-   ```cpp
-   const char* serverName1 = "http://SEU_IP:8080/dog/motor/estadomotor";
-   const char* serverName2 = "http://SEU_IP:8080/dog/getinfo/get";
-   const char* serverName3 = "http://SEU_IP:8080/dog/tempoalimentacao/gettempoalimentacao.php";
-   ```
-4. Configure o pino do motor (atualmente usando pino 12 como LED):
-   ```cpp
-   const int ledPin = 12; // Altere para o pino do seu motor
-   ```
-5. Faça o upload do código para o ESP32
+O firmware e o frontend chamam as rotas sob o prefixo `/dog/...`. Esses
+caminhos **não correspondem 1:1** às pastas em disco (que contêm espaços e
+nomes diferentes), então o servidor precisa expô-los via `Alias`/`Rewrite`
+(Apache) ou configuração equivalente. Mapeamento esperado:
 
-### 4. Configuração do Site Web
+| Método | Rota usada pelo cliente                      | Arquivo no disco                               |
+|--------|----------------------------------------------|------------------------------------------------|
+| GET    | `/dog/motor/estadomotor`                     | `Motor estados/estadomotor.php`                |
+| POST   | `/dog/motor/postestadomotor`                 | `Motor estados/postestadomotor.php`            |
+| GET    | `/dog/getinfo/get`                           | `getinfo horarios/get.php`                     |
+| POST   | `/dog/insertinfo/insertdata`                 | `insertinfo horarios/insertdata.php`           |
+| GET    | `/dog/tempoalimentacao/gettempoalimentacao.php` | `tempoalimentacao/gettempoalimentacao.php`  |
+| POST   | `/dog/tempoalimentacao/inserttempoalimentacao`  | `tempoalimentacao/inserttempoalimentacao.php`|
 
-1. Navegue até a pasta `SITE/`:
-   ```bash
-   cd SITE
-   ```
+### `GET /dog/motor/estadomotor`
+Retorna a última linha de `liga_desliga`.
+```json
+{ "id": 1, "estado": 0 }
+```
 
-2. Instale as dependências:
-   ```bash
-   npm install
-   ```
+### `POST /dog/motor/postestadomotor`
+Atualiza o estado do motor. Corpo:
+```json
+{ "estado": 1 }
+```
 
-3. Configure o endereço IP do servidor nos arquivos JavaScript:
-   ```javascript
-   // Em script.js e configure.html
-   // Altere: http://192.168.100.103:8080/dog/...
-   // Para: http://SEU_IP:8080/dog/...
-   ```
-
-4. Inicie o servidor de desenvolvimento:
-   ```bash
-   npm start
-   ```
-
-   Ou faça o build para produção:
-   ```bash
-   npm run build
-   ```
-
-## 📖 Como Usar
-
-### Configuração Inicial
-
-1. **Acesse a interface web** através do navegador
-2. **Configure os horários de alimentação**:
-   - Clique em "Register schedules"
-   - Configure 3 horários diferentes (em ordem crescente)
-   - Clique em "Configure"
-
-3. **Configure o tempo de alimentação**:
-   - Na mesma tela, defina o tempo em segundos (máximo 10 segundos)
-   - Clique em "Set"
-
-### Alimentação Automática
-
-O ESP32 verifica automaticamente os horários configurados e aciona o motor quando:
-- A hora atual coincide com um dos 3 horários programados
-- O motor fica ligado pelo tempo configurado
-
-### Alimentação Manual
-
-1. Acesse o menu principal
-2. Clique em **"Feed now"**
-3. O motor será acionado imediatamente pelo tempo configurado
-
-## 🔌 API Endpoints
-
-### Motor - Estado
-
-#### GET `/dog/motor/estadomotor`
-Retorna o estado atual do motor.
-
-**Resposta:**
+### `GET /dog/getinfo/get`
+Retorna o último horário de cada tabela (campos renomeados para `hora`/`minuto`).
+Cada chave pode ser `null` se a tabela estiver vazia.
 ```json
 {
-  "id": 1,
-  "estado": 0
+  "Horario1": { "hora": 8,  "minuto": 0  },
+  "Horario2": { "hora": 14, "minuto": 30 },
+  "Horario3": { "hora": 20, "minuto": 0  }
 }
 ```
 
-#### POST `/dog/motor/postestadomotor`
-Atualiza o estado do motor.
-
-**Body:**
+### `POST /dog/insertinfo/insertdata`
+Insere uma nova linha em cada tabela de horário.
 ```json
 {
-  "estado": 1
+  "horario1": { "hora": 8,  "minuto": 0  },
+  "horario2": { "hora": 14, "minuto": 30 },
+  "horario3": { "hora": 20, "minuto": 0  }
 }
 ```
 
-### Horários de Alimentação
-
-#### GET `/dog/getinfo/get`
-Retorna os 3 horários configurados.
-
-**Resposta:**
-```json
-{
-  "Horario1": {
-    "hora": 8,
-    "minuto": 0
-  },
-  "Horario2": {
-    "hora": 14,
-    "minuto": 30
-  },
-  "Horario3": {
-    "hora": 20,
-    "minuto": 0
-  }
-}
-```
-
-#### POST `/dog/insertinfo/insertdata`
-Insere novos horários de alimentação.
-
-**Body:**
-```json
-{
-  "horario1": {
-    "hora": 8,
-    "minuto": 0
-  },
-  "horario2": {
-    "hora": 14,
-    "minuto": 30
-  },
-  "horario3": {
-    "hora": 20,
-    "minuto": 0
-  }
-}
-```
-
-### Tempo de Alimentação
-
-#### GET `/dog/tempoalimentacao/gettempoalimentacao.php`
-Retorna o tempo de alimentação configurado (em segundos).
-
-**Resposta:**
+### `GET /dog/tempoalimentacao/gettempoalimentacao.php`
+Retorna **um array** com todos os valores da tabela `tempo`. O firmware lê
+apenas o índice `[0]`.
 ```json
 [5]
 ```
 
-#### POST `/dog/tempoalimentacao/inserttempoalimentacao`
-Insere o tempo de alimentação.
-
-**Body:**
+### `POST /dog/tempoalimentacao/inserttempoalimentacao`
+Atualiza a duração do pulso (em segundos). Corpo:
 ```json
-{
-  "tempoalimentacao": 5
-}
+{ "tempoalimentacao": 5 }
 ```
-
-## 🔧 Tecnologias Utilizadas
-
-### Hardware
-- **ESP32** - Microcontrolador com WiFi integrado
-- **Motor DC** - Para dispensar a ração
-
-### Backend
-- **PHP 7+** - Linguagem de programação
-- **MySQL** - Banco de dados relacional
-- **REST API** - Arquitetura de API
-
-### Frontend
-- **HTML5** - Estrutura
-- **CSS3** - Estilização
-- **JavaScript (ES6+)** - Lógica e interatividade
-- **Parcel** - Build tool
-
-### Firmware
-- **Arduino IDE** - Ambiente de desenvolvimento
-- **ArduinoJson** - Biblioteca para manipulação JSON
-- **WiFi Library** - Conexão WiFi
-- **HTTPClient** - Requisições HTTP
-- **NTP Client** - Sincronização de horário
-
-## 📸 Imagens do Projeto
-
-### Interface Web
-![Telas](https://github.com/user-attachments/assets/edb493bb-f179-464c-a0a5-08fc34f72b28)
-
-### Projeto 3D
-![Modelo 3D 1](https://github.com/user-attachments/assets/36a538cf-b547-476c-8221-f3f29bc3860a)
-![Modelo 3D 2](https://github.com/user-attachments/assets/0f17ccc6-d330-464a-81d8-4eb8112f94ca)
-
-## 🎥 Vídeo Demonstrativo
-
-Assista ao vídeo completo do projeto:
-[![Vídeo](https://img.youtube.com/vi/XxYPfcei0gA/0.jpg)](https://www.youtube.com/watch?v=XxYPfcei0gA)
-
-## 🔍 Funcionamento Técnico
-
-### Fluxo de Alimentação Automática
-
-1. ESP32 conecta ao WiFi e sincroniza horário via NTP
-2. A cada loop, ESP32 faz requisição GET para obter horários
-3. Compara hora/minuto atual com horários configurados
-4. Quando há coincidência, aciona o motor
-5. Motor fica ligado pelo tempo configurado (alternando HIGH/LOW)
-6. Após completar, marca o horário como executado
-
-### Fluxo de Alimentação Manual
-
-1. Usuário clica em "Feed now" na interface web
-2. JavaScript envia POST para API atualizando estado do motor para "1"
-3. ESP32 faz requisição GET para verificar estado do motor
-4. Detecta estado "1" e aciona o motor imediatamente
-5. Após completar, ESP32 envia POST para resetar estado para "0"
-
-## ⚙️ Configurações Importantes
-
-### Fuso Horário
-O ESP32 está configurado para GMT-3 (Horário de Brasília):
-```cpp
-const long gmtOffset_sec = -3 * 3600;
-```
-
-### Intervalo de Verificação
-O ESP32 verifica os horários a cada loop (aproximadamente a cada segundo).
-
-### Tempo Máximo de Alimentação
-O tempo de alimentação está limitado a 10 segundos na interface web.
-
-## 🐛 Troubleshooting
-
-### ESP32 não conecta ao WiFi
-- Verifique as credenciais WiFi no código
-- Certifique-se de que o ESP32 está no alcance da rede
-- Verifique se a rede WiFi está funcionando
-
-### API não responde
-- Verifique se o servidor PHP está rodando
-- Confirme o endereço IP do servidor
-- Verifique as configurações de CORS nos arquivos PHP
-- Teste os endpoints manualmente com Postman ou curl
-
-### Motor não aciona
-- Verifique a conexão física do motor ao ESP32
-- Confirme se o pino está correto no código
-- Teste o pino com um LED primeiro
-- Verifique se o estado está sendo atualizado no banco de dados
-
-### Horários não funcionam
-- Verifique se os horários foram salvos no banco de dados
-- Confirme se o ESP32 está sincronizado com NTP
-- Verifique os logs do Serial Monitor do Arduino IDE
-
-## 📝 Licença
-
-Este projeto está sob a licença ISC.
-
-## 👥 Autores
-
-- **Equipe DOGFEEDER** - Projeto 2024
-
-## 🙏 Agradecimentos
-
-Projeto desenvolvido como solução para automatização da alimentação de animais de estimação.
 
 ---
 
+## Firmware (ESP32)
 
-**Esp32 - Dogfeeder - project 2024**
+Arquivo: [ESP32 CODE/CODE-1.0/CODE-1.0.ino](ESP32%20CODE/CODE-1.0/CODE-1.0.ino)
 
-*Take care of those who love you* 🐕❤️
+**Inicialização (`setup`)**
+- Configura `GPIO 12` como saída (`ledPin`), nível de repouso `HIGH`.
+- Conecta ao Wi-Fi (bloqueante até obter `WL_CONNECTED`).
+- Sincroniza o relógio via SNTP: `pool.ntp.org`, offset `GMT-3`, sem horário de
+  verão (`daylightOffset_sec = 0`).
 
+**Loop principal** — a cada iteração, sem `delay`, o firmware:
+1. `GET /dog/motor/estadomotor` → lê a flag de comando manual.
+2. `GET .../gettempoalimentacao.php` → lê a duração do pulso (s) e converte para
+   ms (`intervalo`, default 5000).
+3. Atualiza hora/minuto locais a partir do relógio sincronizado.
+4. `GET /dog/getinfo/get` → carrega os três horários.
+5. Avalia as condições de acionamento (manual e por horário).
+
+**Acionamento do motor** — implementado como pulso não-bloqueante via
+`millis()`: o pino sai do repouso (`HIGH`) para `LOW` por `intervalo` ms e
+retorna a `HIGH`, caracterizando um acionamento ativo-baixo de duração
+`tempoalimentacao` segundos.
+
+- **Manual:** quando `estado == "1"`, executa o pulso e, ao final, envia
+  `POST .../postestadomotor` com `{"estado": 0}` para limpar o comando.
+- **Por horário:** quando `horaAtual`/`minutoAtual` coincidem com um horário
+  programado e a flag `demosComidaN` está em `0`, executa o pulso e marca
+  `demosComidaN = 1`.
+
+> Por iteração o firmware dispara **três requisições HTTP** sem nenhum atraso
+> entre os ciclos — o `loop` roda tão rápido quanto a rede permitir. Em
+> produção, recomenda-se adicionar um `delay` (p.ex. 1 s) para reduzir carga na
+> rede e na API.
+
+---
+
+## Frontend
+
+Site estático em [SITE/](SITE/), empacotado com Parcel. A lógica principal
+está em [SITE/script.js](SITE/script.js):
+
+- Navegação entre telas (`index`, `Menu`, `configure`, `login`, `account`).
+- Botão **Feed now** → `POST /dog/motor/postestadomotor` com `{"estado": 1}`
+  via `XMLHttpRequest`. O reset para `0` é responsabilidade do ESP32, não do
+  frontend.
+
+A tela de configuração grava os três horários (em ordem crescente) e a duração
+do pulso (limitada a 10 s na UI).
+
+---
+
+## Execução
+
+### Pré-requisitos
+- ESP32 com Wi-Fi e Arduino IDE (bibliotecas: `WiFi`, `HTTPClient`, `ArduinoJson`).
+- PHP 7+ e MySQL (ex.: XAMPP/WAMP) com mod de reescrita habilitado.
+- Node.js + npm para o frontend.
+
+### 1. Banco de dados
+Execute o SQL da seção [Modelo de dados](#modelo-de-dados), incluindo as linhas
+iniciais de `tempo` e `liga_desliga`.
+
+### 2. API PHP
+1. Sirva a pasta `API PHP/` no servidor web e configure o roteamento `/dog/...`
+   conforme a tabela de [API HTTP](#api-http).
+2. Ajuste as credenciais MySQL no topo de cada `.php`
+   (`$servername`/`$username`/`$password`/`$dbname`).
+
+### 3. Firmware
+No `.ino`, configure antes do upload:
+```cpp
+const char* ssid     = "SEU_SSID";
+const char* password = "SUA_SENHA";
+
+const char* serverName1 = "http://SEU_IP:8080/dog/motor/estadomotor";
+const char* serverName2 = "http://SEU_IP:8080/dog/getinfo/get";
+const char* serverName3 = "http://SEU_IP:8080/dog/tempoalimentacao/gettempoalimentacao.php";
+
+const int ledPin = 12;  // pino do driver do motor
+```
+A URL de POST do reset de estado está embutida em `enviarSolicitacaoPOST()` e
+também precisa apontar para o seu IP.
+
+### 4. Frontend
+```bash
+cd SITE
+npm install
+npm start          # dev server (Parcel)
+npm run build      # build de produção em ./build
+```
+Atualize o IP do servidor nas chamadas HTTP de `script.js` (e demais arquivos
+que apontam para `192.168.100.103:8080`).
+
+---
+
+## Limitações e considerações de segurança
+
+Este projeto é um protótipo acadêmico. Pontos relevantes antes de qualquer uso
+fora de uma rede local controlada:
+
+- **Credenciais versionadas:** o `.ino` contém SSID/senha de Wi-Fi reais e os
+  PHP usam `root` sem senha. Troque e remova do histórico antes de publicar.
+- **SQL injection:** todos os endpoints interpolam a entrada diretamente na
+  query (`UPDATE ... SET estado = $estado`). Use *prepared statements*.
+- **Sem autenticação e CORS liberado (`*`):** qualquer cliente na rede pode
+  acionar o motor ou reconfigurar horários.
+- **Agendamento não reinicia diariamente:** as flags `demosComida1/2/3` são
+  marcadas como `1` e **nunca voltam para `0`** no código atual. Cada horário
+  dispara no máximo uma vez por ciclo de energia do ESP32 — não há reset à
+  meia-noite. Para alimentação diária recorrente, é preciso zerar as flags
+  quando o minuto deixa de coincidir.
+- **Estado único e global:** não há suporte a múltiplos pets, dispositivos ou
+  usuários.
+- **Polling agressivo:** loop sem `delay` (ver seção de firmware).
+
+---
+
+## Licença
+
+ISC.
